@@ -1,7 +1,7 @@
+import datetime
 import logging
 import os
 import time
-from datetime import datetime
 
 import requests
 import schedule
@@ -42,7 +42,7 @@ def write_to_influxdb(data):
     client = InfluxDBClient(url=influxdb_url, token=influxdb_token, org=influxdb_org)
     write_api = client.write_api(write_options=SYNCHRONOUS)
 
-    current_time = datetime.utcnow()
+    current_time = datetime.datetime.now(datetime.UTC)
 
     if data.get("Cnt", 0) == 0:
         logging.info("'Cnt' value is zero. No write operation performed.")
