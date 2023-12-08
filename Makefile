@@ -1,4 +1,4 @@
-IMAGE_NAME = diegmonti/influx-data-sync
+IMAGE_NAME = diegmonti/vm-data-sync
 
 build:
 	docker build -t $(IMAGE_NAME) .

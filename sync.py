@@ -1,22 +1,17 @@
-import datetime
 import logging
 import os
 import time
 
 import requests
 import schedule
-from influxdb_client import InfluxDBClient, Point
-from influxdb_client.client.write_api import SYNCHRONOUS, WritePrecision
 
 # Logging module configuration
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
-# InfluxDB configuration
-influxdb_token = os.getenv("INFLUXDB_TOKEN", "default_token")
-influxdb_org = os.getenv("INFLUXDB_ORG", "default_org")
-influxdb_bucket = os.getenv("INFLUXDB_BUCKET", "default_bucket")
-influxdb_url = os.getenv("INFLUXDB_URL", "http://localhost:8086")
+# VictoriaMetrics configuration
+victoriametrics_url = os.getenv("VICTORIAMETRICS_URL", "http://localhost:8428/write")
 measurement_name = os.getenv("MEASUREMENT_NAME", "default_measurement")
+instance_name = os.getenv("INSTANCE_NAME", "127.0.0.1:80")
 
 # HTTP endpoint configuration
 http_endpoint = os.getenv("HTTP_ENDPOINT", "http://localhost/status")
@@ -37,30 +32,33 @@ def download_json():
         return None
 
 
-# Function to write data to InfluxDB
-def write_to_influxdb(data):
-    client = InfluxDBClient(url=influxdb_url, token=influxdb_token, org=influxdb_org)
-    write_api = client.write_api(write_options=SYNCHRONOUS)
-
-    current_time = datetime.datetime.now(datetime.UTC)
-
+# Function to write data to VictoriaMetrics
+def write_to_victoriametrics(data):
     if data.get("Cnt", 0) == 0:
         logging.info("'Cnt' value is zero. No write operation performed.")
-        client.close()
         return
 
-    point = Point(measurement_name).time(current_time, WritePrecision.NS)
+    # This is not a metric
+    del data["Mac"]
 
-    for key, value in data.items():
-        field_name = key.replace(" ", "_").lower()
-        if isinstance(value, str):
-            point.field(field_name, value)
-        else:
-            point.field(field_name, float(value))
+    try:
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
 
-    write_api.write(bucket=influxdb_bucket, record=point)
+        payload = f"{measurement_name},instance={instance_name},job={measurement_name} {','.join([f'{key.lower()}={value}' for key, value in data.items()])}\n"
 
-    client.close()
+        response = requests.post(
+            victoriametrics_url,
+            headers=headers,
+            data=payload,
+        )
+
+        response.raise_for_status()
+
+        logging.info("Data successfully written to VictoriaMetrics.")
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error writing data to VictoriaMetrics: {e}")
 
 
 # Function to sync data
@@ -69,14 +67,13 @@ def job():
     json_data = download_json()
 
     if json_data:
-        write_to_influxdb(json_data)
-        logging.info("Data successfully written to InfluxDB.")
+        write_to_victoriametrics(json_data)
     else:
         logging.error("Error in downloading JSON or no data available.")
 
 
 # Schedule the job function to run
-schedule.every(5).minutes.do(job)
+schedule.every(1).minutes.do(job)
 
 # Main loop
 while True:
