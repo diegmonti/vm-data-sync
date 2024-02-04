@@ -1,7 +1,7 @@
 import logging
 import os
 import time
-
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import requests
 import schedule
 
@@ -15,6 +15,9 @@ instance_name = os.getenv("INSTANCE_NAME", "127.0.0.1:80")
 
 # HTTP endpoint configuration
 http_endpoint = os.getenv("HTTP_ENDPOINT", "http://localhost/status")
+
+# Variable to keep track of the timestamp of the last successful job
+last_successful_job_timestamp = time.time()
 
 
 # Function to download JSON from the HTTP endpoint
@@ -56,6 +59,10 @@ def write_to_victoriametrics(data):
 
         response.raise_for_status()
 
+        # Update the timestamp of the last successful job
+        global last_successful_job_timestamp
+        last_successful_job_timestamp = time.time()
+
         logging.info("Data successfully written to VictoriaMetrics.")
     except requests.exceptions.RequestException as e:
         logging.error(f"Error writing data to VictoriaMetrics: {e}")
@@ -75,7 +82,36 @@ def job():
 # Schedule the job function to run
 schedule.every(1).minutes.do(job)
 
+
+# HTTP handler for health check
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        global last_successful_job_timestamp
+
+        current_time = time.time()
+
+        if current_time - last_successful_job_timestamp <= 300:
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(bytes("OK", "utf8"))
+        else:
+            self.send_response(500)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(
+                bytes("Error: Last successful job is more than 5 minutes old", "utf8")
+            )
+
+
+# Set up the HTTP server
+port = 8080
+http_server = HTTPServer(("localhost", port), HealthHandler)
+
+logging.info(f"Health check server started on port {port}")
+
 # Main loop
 while True:
     schedule.run_pending()
     time.sleep(1)
+    http_server.handle_request()
